@@ -1,12 +1,18 @@
-import express, { Request, Response } from "express";
+import express from "express";
 import { getDb, connectToDb } from "./db";
-import { ObjectId } from "mongodb";
-import jwt from "jsonwebtoken";
 import cors from "cors";
-import { ICreator, ISubscription } from "./types";
 
-const SECRET_KEY = process.env.SECRET_KEY || "";
+console.log("app!!!!!");
+
 const port = process.env.PORT || 3000;
+
+// authorization for D-ID
+const DID_API_URL = process.env.DID_API_URL;
+const DID_API_KEY = process.env.DID_API_KEY;
+
+// authorization for youtube
+const VIDEO_ID = process.env.VIDEO_ID;
+const API_KEY = process.env.API_KEY;
 
 const app = express();
 app.use(express.json());
@@ -28,515 +34,261 @@ const initServer = async () => {
 
 initServer();
 
-app.get("/data", async (req: Request, res: Response) => {
+app.post("/talks-stream", async (req, res) => {
+  const { imgUrl } = req.body;
+  console.log("imgUrl", imgUrl);
+  console.log("req.body", req.body);
+
   try {
-    const data = await db.collection("data").find().toArray();
+    const response = await fetch(`${DID_API_URL}/talks/streams`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${DID_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        source_url: imgUrl,
+      }),
+    });
+
+    const data = await response.json();
+    res.status(200).json(data);
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+app.post("/ice", async (req, res) => {
+  const { candidate, sdpMid, sdpMLineIndex, sessionId } = req.body;
+  try {
+    const response = await fetch(
+      `${DID_API_URL}/talks/streams/${req.body.streamId}/ice`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${DID_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          candidate,
+          sdpMid,
+          sdpMLineIndex,
+          session_id: sessionId,
+        }),
+      }
+    );
+
+    const data = await response.json();
+    res.status(200).json(data);
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+app.post("/sdp", async (req, res) => {
+  const { streamId, sessionClientAnswer, sessionId } = req.body;
+
+  try {
+    const response = await fetch(
+      `${DID_API_URL}/talks/streams/${streamId}/sdp`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${DID_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          answer: sessionClientAnswer,
+          session_id: sessionId,
+        }),
+      }
+    );
+
+    const data = await response.json();
+    res.status(200).json(data);
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+app.delete("/stream/:streamId", async (req, res) => {
+  const { streamId } = req.params;
+  const { sessionId } = req.body;
+
+  try {
+    const response = await fetch(`${DID_API_URL}/talks/streams/${streamId}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Basic ${DID_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    res.status(200).send("Delete request successful");
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+app.post("/streams", async (req, res) => {
+  const { streamId, script, driver_url, config, sessionId } = req.body;
+  console.log("req.body >>", req.body);
+
+  try {
+    const response = await fetch(`${DID_API_URL}/talks/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${DID_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        script,
+        driver_url,
+        config,
+        session_id: sessionId,
+      }),
+    });
+
+    const data = await response.json();
+    console.log("streams data >>", data);
 
     res.status(200).json(data);
   } catch (error) {
-    res.status(500).json({ error });
+    console.error("Error:", error);
+    res.status(500).send("Internal Server Error");
   }
 });
 
-app.get("/announced", async (req: Request, res: Response) => {
-  try {
-    const data = await db.collection("announced").find().toArray();
-
-    res.status(200).json(data);
-  } catch (error) {
-    res.status(500).json({ error });
-  }
-});
-
-// TODO: comment out this route for now
-// app.post("/data", async (req: Request, res: Response) => {
-//   try {
-//     const result = await db.collection("data").insertOne(req.body);
-//     res.status(201).json(result);
-//   } catch (error) {
-//     res.status(500).json({ error: "Could not create new document" });
-//   }
-// });
-
-app.patch("/data/:id", async (req: Request, res: Response) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ error: "No token provided" });
-  }
-  if (!ObjectId.isValid(req.params.id)) {
-    return res.status(400).json({ error: "Invalid ObjectId" });
-  }
-
-  try {
-    jwt.verify(token, SECRET_KEY);
-
-    const result = await db
-      .collection("data")
-      .updateOne({ _id: new ObjectId(req.params.id) }, { $set: req.body });
-    res.status(200).json(result);
-  } catch (error) {
-    res.status(500).json({ error });
-  }
-});
-
-app.patch("/announced", async (req: Request, res: Response) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ error: "No token provided" });
-  }
-  if (!ObjectId.isValid(req.params.id)) {
-    return res.status(400).json({ error: "Invalid ObjectId" });
-  }
-
-  const idsToUpdate = req.body.idsToUpdate.map(
-    (id: string) => new ObjectId(id)
+const createRegex = (initialTexts: string[]) => {
+  // Escape special characters in each initial text
+  const escapedInitialTexts = initialTexts.map((text) =>
+    text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   );
 
+  // Join the escaped texts with the pipe symbol (|) for the regex 'or' condition
+  const initialTextsPattern = escapedInitialTexts.join("|");
+
+  // Return the new regex, matching the literal '+1' or variations of it
+  return new RegExp(`(?:${initialTextsPattern})(?:\\+1|\\+\\+|\\+{3,}|讚)`);
+};
+
+type LiveChatMessage = {
+  id: string;
+  snippet: {
+    displayMessage: string;
+  };
+};
+
+type ChatData = {
+  items: LiveChatMessage[];
+};
+
+let blueCount = 0;
+let whiteCount = 0;
+let greenCount = 0;
+
+const processChatMessages = (chatData: LiveChatMessage[]) => {
+  const blueRegex = createRegex([
+    "猴猴",
+    "hoho",
+    "侯友宜",
+    "友宜",
+    "ho",
+    "侯侯",
+  ]);
+  const whiteRegex = createRegex([
+    "柯柯",
+    "KP",
+    "科P",
+    "柯文哲",
+    "文哲",
+    "kp",
+    "柯P",
+    "柯p",
+  ]);
+  const greenRegex = createRegex([
+    "賴賴",
+    "金孫",
+    "賴功德",
+    "功德",
+    "賴清德",
+    "清德",
+    "lai",
+    "lailai",
+  ]);
+
+  chatData.forEach((item) => {
+    if (blueRegex.test(item.snippet.displayMessage)) {
+      blueCount++;
+    }
+    if (whiteRegex.test(item.snippet.displayMessage)) {
+      whiteCount++;
+    }
+    if (greenRegex.test(item.snippet.displayMessage)) {
+      greenCount++;
+    }
+  });
+
+  return { blueCount, whiteCount, greenCount };
+};
+
+let lastProcessedMessageId: string | null = null;
+
+async function getLiveChatMessages(): Promise<LiveChatMessage[]> {
   try {
-    jwt.verify(token, SECRET_KEY);
-    const filter = { _id: { $in: idsToUpdate } };
-    const update = { $set: { isExecuted: true } };
+    console.log("getLiveChatMessages!!");
 
-    const result = await db.collection("announced").updateMany(filter, update);
+    const videoUrl = `https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${VIDEO_ID}&key=${API_KEY}`;
+    const videoResponse = await fetch(videoUrl);
+    const videoData = await videoResponse.json();
+    console.log("videoData", videoData);
 
-    res.status(200).json(result);
-  } catch (error) {
-    res.status(500).json({ error });
-  }
-});
+    const liveChatId = videoData.items[0].liveStreamingDetails.activeLiveChatId;
 
-app.get("/creators/:id", (req, res) => {
-  if (ObjectId.isValid(req.params.id)) {
-    db.collection("creators")
-      .findOne({ _id: new ObjectId(req.params.id) })
-      .then((doc: any) => {
-        res.status(200).json(doc);
-      })
-      .catch((err: any) => {
-        res.status(500).json({ error: "Could not fetch the document" });
-      });
-  } else {
-    res.status(500).json({ error: "Could not fetch the document" });
-  }
-});
+    const chatUrl = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${liveChatId}&part=id,snippet,authorDetails&key=${API_KEY}&maxResults=2000`;
+    const chatResponse = await fetch(chatUrl);
+    const chatData: ChatData = await chatResponse.json();
 
-app.patch("/creators/:id", async (req: Request, res: Response) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ error: "No token provided" });
-  }
-  if (!ObjectId.isValid(req.params.id)) {
-    return res.status(400).json({ error: "Invalid ObjectId" });
-  }
-
-  try {
-    jwt.verify(token, SECRET_KEY);
-
-    const result = await db
-      .collection("creators")
-      .updateOne({ _id: new ObjectId(req.params.id) }, { $set: req.body });
-    res.status(200).json(result);
-  } catch (error) {
-    res.status(500).json({ error });
-  }
-});
-
-app.post("/creators", async (req: Request, res: Response) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ error: "No token provided" });
-  }
-
-  try {
-    jwt.verify(token, SECRET_KEY);
-
-    const newCreator = req.body;
-    const result = await db.collection("creators").insertOne(newCreator);
-
-    res.status(201).json({ result });
-  } catch (error) {
-    res.status(500).json({ error });
-  }
-});
-
-app.delete("/creators/:id", async (req: Request, res: Response) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ error: "No token provided" });
-  }
-  if (!ObjectId.isValid(req.params.id)) {
-    return res.status(400).json({ error: "Invalid ObjectId" });
-  }
-
-  try {
-    jwt.verify(token, SECRET_KEY);
-
-    const result = await db
-      .collection("creators")
-      .deleteOne({ _id: new ObjectId(req.params.id) });
-
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ error: "Creator not found" });
-    }
-
-    res.status(200).json({ message: "Creator deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ error });
-  }
-});
-
-app.get("/creators/network/:network", async (req: Request, res: Response) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ error: "No token provided" });
-  }
-
-  try {
-    jwt.verify(token, SECRET_KEY);
-
-    const network = req.params.network;
-    const creators = await db
-      .collection("creators")
-      .find({ network })
-      .toArray();
-    res.status(200).json(creators);
-  } catch (error) {
-    res.status(500).json({ error });
-  }
-});
-
-app.patch(
-  "/creators/network/:network/address/:address",
-  async (req: Request, res: Response) => {
-    const token = req.headers.authorization?.split(" ")[1];
-    if (!token) {
-      return res.status(401).json({ error: "No token provided" });
-    }
-
-    try {
-      jwt.verify(token, SECRET_KEY);
-
-      const address = req.params.address;
-      const network = req.params.network;
-      const creator = await db
-        .collection("creators")
-        .findOne({ address, network });
-
-      if (!creator) {
-        return res.status(404).json({ error: "Creator not found" });
-      }
-
-      const result = await db
-        .collection("creators")
-        .updateOne({ address, network }, { $set: req.body });
-
-      res.status(200).json(result);
-    } catch (error) {
-      res.status(500).json({ error });
-    }
-  }
-);
-
-app.get(
-  "/creators/network/:network/address/:address",
-  async (req: Request, res: Response) => {
-    const token = req.headers.authorization?.split(" ")[1];
-    if (!token) {
-      return res.status(401).json({ error: "No token provided" });
-    }
-
-    try {
-      jwt.verify(token, SECRET_KEY);
-
-      const address = req.params.address;
-      const network = req.params.network;
-      const creator = await db
-        .collection("creators")
-        .findOne({ address, network });
-
-      res.status(200).json(creator);
-    } catch (error) {
-      res.status(500).json({ error });
-    }
-  }
-);
-
-app.delete(
-  "/creators/network/:network/address/:address",
-  async (req: Request, res: Response) => {
-    const token = req.headers.authorization?.split(" ")[1];
-    if (!token) {
-      return res.status(401).json({ error: "No token provided" });
-    }
-
-    try {
-      jwt.verify(token, SECRET_KEY);
-
-      const address = req.params.address;
-      const network = req.params.network;
-      const result = await db
-        .collection("creators")
-        .deleteOne({ address, network });
-
-      if (result.deletedCount === 0) {
-        return res.status(404).json({ error: "Creator not found" });
-      }
-
-      res.status(200).json({ message: "Creator deleted successfully" });
-    } catch (error) {
-      res.status(500).json({ error });
-    }
-  }
-);
-
-// add create, update delete subscriptions
-app.post("/subscriptions", async (req: Request, res: Response) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ error: "No token provided" });
-  }
-
-  const {
-    creator,
-    supporter,
-    pureProxy,
-    expiresOn,
-    subscribedTime,
-    network,
-    isCommitted,
-  } = req.body;
-  if (
-    !creator ||
-    !supporter ||
-    !pureProxy ||
-    !expiresOn ||
-    !subscribedTime ||
-    !network ||
-    !isCommitted
-  ) {
-    return res.status(400).json({ error: "Missing fields in request body." });
-  }
-
-  try {
-    jwt.verify(token, SECRET_KEY);
-
-    const newSubscription: ISubscription = {
-      creator,
-      supporter,
-      pureProxy,
-      expiresOn,
-      subscribedTime,
-      network,
-      isCommitted,
-    };
-    const result = await db
-      .collection("subscriptions")
-      .insertOne(newSubscription);
-
-    res.status(201).json({ result });
-  } catch (error) {
-    res.status(500).json({ error });
-  }
-});
-
-app.get(
-  "/subscriptions/network/:network/creator/:creator/supporter/:supporter",
-  async (req: Request, res: Response) => {
-    const network = req.params.network;
-    const creator = req.params.creator;
-    const supporter = req.params.supporter;
-    if (!network || !creator || !supporter) {
-      return res.status(400).json({ error: "Missing address in request." });
-    }
-
-    try {
-      let subscription = await db
-        .collection("subscriptions")
-        .findOne({ network, creator, supporter });
-
-      if (!subscription) {
-        subscription = null;
-      }
-
-      res.status(200).json(subscription);
-    } catch (error) {
-      res.status(500).json({ error });
-    }
-  }
-);
-
-app.get(
-  "/subscriptions/network/:network/supporter/:supporter",
-  async (req: Request, res: Response) => {
-    const network = req.params.network;
-    const supporter = req.params.supporter;
-
-    if (!network || !supporter) {
-      return res
-        .status(400)
-        .json({ error: "Missing network or supporter in request." });
-    }
-
-    try {
-      const subscriptions = await db
-        .collection("subscriptions")
-        .find({ network, supporter })
-        .toArray();
-
-      // Extract unique creator addresses from the subscriptions
-      const creatorAddresses = [
-        ...new Set(subscriptions.map((sub: ISubscription) => sub.creator)),
-      ];
-
-      // Fetch all creators in one go
-      const creators = await db
-        .collection("creators")
-        .find({ address: { $in: creatorAddresses }, network })
-        .toArray();
-
-      // Map creators by their address for easier access
-      const creatorsMap: Record<string, ICreator> = creators.reduce(
-        (acc: Record<string, ICreator>, creator: ICreator) => {
-          acc[creator.address] = creator;
-          return acc;
-        },
-        {}
+    let newMessages: LiveChatMessage[] = chatData.items;
+    if (lastProcessedMessageId) {
+      const lastProcessedIndex = chatData.items.findIndex(
+        (item) => item.id === lastProcessedMessageId
       );
-
-      // Map subscriptions to desired structure
-      const transformedSubscriptions = subscriptions.map(
-        (subscription: ISubscription) => {
-          const creatorDoc = creatorsMap[subscription.creator];
-          return {
-            ...subscription,
-            display: creatorDoc?.identity?.display || "Unknown Creator",
-            imgUrl: creatorDoc?.additionalInfo?.imgUrl || null,
-          };
-        }
-      );
-
-      res.status(200).json(transformedSubscriptions);
-    } catch (error) {
-      res.status(500).json({ error });
-    }
-  }
-);
-
-app.put("/subscriptions", async (req: Request, res: Response) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ error: "No token provided" });
-  }
-
-  const { creator, supporter, pureProxy, expiresOn } = req.body;
-
-  if (!creator || !supporter) {
-    return res.status(400).json({
-      error:
-        "Both creator and supporter fields are required for identifying the subscription to update.",
-    });
-  }
-
-  try {
-    jwt.verify(token, SECRET_KEY);
-
-    const criteria = {
-      creator: creator,
-      supporter: supporter,
-    };
-
-    const updatedSubscription: Partial<ISubscription> = {};
-    if (pureProxy) updatedSubscription.pureProxy = pureProxy;
-    if (expiresOn) updatedSubscription.expiresOn = expiresOn;
-
-    const result = await db
-      .collection("subscriptions")
-      .updateOne(criteria, { $set: updatedSubscription });
-
-    if (result.modifiedCount === 0) {
-      return res
-        .status(404)
-        .json({ error: "Subscription not found or no changes made." });
-    }
-
-    res.status(200).json({ result });
-  } catch (error) {
-    res.status(500).json({ error });
-  }
-});
-
-app.delete("/subscriptions", async (req: Request, res: Response) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ error: "No token provided" });
-  }
-
-  const { creator, supporter, network } = req.body;
-  if (!creator || !supporter || !network) {
-    return res.status(400).json({
-      error: "Please provide creator, supporter and network to delete.",
-    });
-  }
-
-  try {
-    jwt.verify(token, SECRET_KEY);
-
-    let criteria = {
-      creator,
-      supporter,
-      network,
-    } as any;
-
-    const result = await db.collection("subscriptions").deleteMany(criteria);
-
-    if (result.deletedCount === 0) {
-      return res
-        .status(404)
-        .json({ error: "No subscriptions found for the provided addresses." });
-    }
-
-    res.status(200).json({ message: "Subscriptions deleted successfully." });
-  } catch (error) {
-    res.status(500).json({ error });
-  }
-});
-
-// add create and read users
-app.post("/users", async (req: Request, res: Response) => {
-  const { address, network, pubKey } = req.body;
-  if (!address || !network || !pubKey) {
-    return res.status(400).json({ error: "Missing fields in request body." });
-  }
-
-  try {
-    const newUser = req.body;
-    const result = await db.collection("users").insertOne(newUser);
-
-    res.status(201).json({ result });
-  } catch (error) {
-    res.status(500).json({ error });
-  }
-});
-
-app.get(
-  "/users/network/:network/address/:address",
-  async (req: Request, res: Response) => {
-    const address = req.params.address;
-    const network = req.params.network;
-    if (!address || !network) {
-      return res.status(400).json({ error: "Missing address in request." });
-    }
-
-    try {
-      let user = await db.collection("users").findOne({ address, network });
-
-      if (!user) {
-        user = null;
+      if (lastProcessedIndex !== -1) {
+        newMessages = chatData.items.slice(lastProcessedIndex + 1);
       }
-
-      res.status(200).json(user);
-    } catch (error) {
-      res.status(500).json({ error });
     }
+
+    if (newMessages?.length > 0) {
+      lastProcessedMessageId = newMessages[newMessages?.length - 1].id;
+    }
+
+    console.log("newMessages", newMessages);
+
+    return newMessages;
+  } catch (error) {
+    console.error("Error fetching live chat messages:", error);
+    throw error;
   }
-);
+}
+
+app.get("/chat", async (req, res) => {
+  try {
+    const chatData = await getLiveChatMessages();
+    const processChatMessagesResult = processChatMessages(chatData);
+    console.log("processChatMessagesResult", processChatMessagesResult);
+
+    res.json(processChatMessagesResult);
+  } catch (error) {
+    res.status(500).send("Error fetching chat data");
+  }
+});
