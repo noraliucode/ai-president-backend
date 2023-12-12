@@ -17,6 +17,18 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+const initServer = async () => {
+  try {
+    app.listen(port, () => {
+      console.log(`app listening on port ${port}`);
+    });
+  } catch (error) {
+    console.error("Error connecting to the database", error);
+  }
+};
+
+initServer();
+
 app.post("/talks-stream", async (req, res) => {
   const { imgUrl } = req.body;
   console.log("imgUrl", imgUrl);
