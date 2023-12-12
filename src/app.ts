@@ -1,5 +1,4 @@
 import express from "express";
-import { getDb, connectToDb } from "./db";
 import cors from "cors";
 
 console.log("app!!!!!");
@@ -17,22 +16,6 @@ const API_KEY = process.env.API_KEY;
 const app = express();
 app.use(express.json());
 app.use(cors());
-
-let db: any;
-
-const initServer = async () => {
-  try {
-    await connectToDb();
-    app.listen(port, () => {
-      console.log(`app listening on port ${port}`);
-    });
-    db = getDb();
-  } catch (error) {
-    console.error("Error connecting to the database", error);
-  }
-};
-
-initServer();
 
 app.post("/talks-stream", async (req, res) => {
   const { imgUrl } = req.body;
